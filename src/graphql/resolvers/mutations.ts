@@ -1,14 +1,28 @@
 import { Context } from '../../types/context';
-import { randomUUID } from 'crypto';
+import { isEmail, isPhoneNumber, sanitizeString, sanitizeEmail } from '../../lib/validation';
+import { MarketDataService } from '../../services/marketDataService';
 
 export const mutationResolvers = {
     updateProfile: async (_: any, args: { name?: string, email?: string, phone?: string }, context: Context) => {
       if (!context.user) throw new Error("Not authenticated");
       if (context.user.role === 'API_CONSUMER') throw new Error("API Keys cannot update user profiles");
       
+      const data: any = {};
+      if (args.name) {
+          data.name = sanitizeString(args.name);
+      }
+      if (args.email) {
+          if (!isEmail(args.email)) throw new Error("Invalid email format");
+          data.email = sanitizeEmail(args.email);
+      }
+      if (args.phone) {
+          if (!isPhoneNumber(args.phone)) throw new Error("Invalid phone number format");
+          data.phone = args.phone; // Assuming we store it as is, or we could strip format
+      }
+
       return context.prisma.user.update({
         where: { id: context.user.id },
-        data: args,
+        data,
       });
     },
     updatePreferences: async (_: any, { preferences }: { preferences: any }, context: Context) => {
@@ -32,12 +46,29 @@ export const mutationResolvers = {
             }
         });
     },
-    createApprovalRequest: async (_: any, args: any, context: Context) => {
-        // TODO: specific logic
+    createApprovalRequest: async (_: any, args: { entityType: string, entityId: string, changeType: string, changeData: any }, context: Context) => {
+        if (!context.user) throw new Error("Not authenticated");
+
+        // Validate Entity Type
+        const allowedEntityTypes = ['COMMODITY', 'PRICE_OBSERVATION', 'CITY', 'SOURCE', 'BRAND']; 
+        if (!allowedEntityTypes.includes(args.entityType)) {
+             throw new Error(`Invalid entity type: ${args.entityType}`);
+        }
+
+        // Validate Change Type
+        const allowedChangeTypes = ['CREATE', 'UPDATE', 'DELETE'];
+        if (!allowedChangeTypes.includes(args.changeType)) {
+            throw new Error(`Invalid change type: ${args.changeType}`);
+        }
+
         return context.prisma.approvalWorkflow.create({
             data: {
-                ...args,
-                requesterId: '00000000-0000-0000-0000-000000000000', // Placeholder
+                entityType: args.entityType,
+                entityId: args.entityId,
+                changeType: args.changeType,
+                changeData: args.changeData,
+                status: 'PENDING',
+                requesterId: context.user.id,
             }
         })
     },
@@ -48,111 +79,7 @@ export const mutationResolvers = {
          throw new Error("Unauthorized");
       }
 
-      const { commodityName, cityName, priceValue, priceCurrency, priceUnit, sourceName, sourceUrl, observedAt, brand, country: countryName, imageUrl } = data;
-
-      // 1. Find City (with optional country filter)
-      let city;
-      if (countryName) {
-        const country = await context.prisma.country.findUnique({
-             where: { name: countryName }
-        });
-        // If country provided but not found, we could fail or fallback. Let's try to search city by name if country not found, but log warning?
-        // Better: search city by name AND countryId if country found.
-        if (country) {
-            city = await context.prisma.city.findFirst({
-                where: { 
-                    name: { equals: cityName, mode: 'insensitive' },
-                    countryId: country.id
-                }
-            });
-        } else {
-             // Try to find city without country constraint, but maybe it's risky?
-             // Or maybe the scraper sends "Tanzania" but we have it stored differently?
-             // Fallback to name-only search
-             city = await context.prisma.city.findFirst({
-                where: { name: { equals: cityName, mode: 'insensitive' } }
-             });
-        }
-      } else {
-        city = await context.prisma.city.findFirst({
-            where: { name: { equals: cityName, mode: 'insensitive' } }
-        });
-      }
-
-      if (!city) {
-         return { success: false, message: `City not found: ${cityName}` };
-      }
-
-      let commodity = await context.prisma.commodity.findFirst({
-        where: { name: { equals: commodityName, mode: 'insensitive' } }
-      });
-
-      if (!commodity) {
-        const alias = await context.prisma.commodityAlias.findFirst({
-             where: { name: { equals: commodityName, mode: 'insensitive' } },
-             include: { commodity: true }
-        });
-        if (alias) {
-            commodity = (alias as any).commodity;
-        }
-      }
-
-      if (!commodity) {
-          return { success: false, message: `Commodity not found: ${commodityName}` };
-      }
-
-      let source = await context.prisma.source.findFirst({
-          where: { name: { equals: sourceName, mode: 'insensitive' } }
-      });
-
-      if (!source) {
-          source = await context.prisma.source.create({
-              data: {
-                  name: sourceName,
-                  type: 'SCRAPER',
-                  url: sourceUrl,
-                  trustScore: 50,
-                  isActive: true
-              }
-          });
-      }
-
-      if (parseFloat(priceValue) < 0) {
-           return { success: false, message: `Invalid price: ${priceValue}` };
-      }
-      
-      const entityId = randomUUID();
-      
-      const changeData = {
-          commodityId: commodity.id,
-          cityId: city.id,
-          sourceId: source.id,
-          priceValue,
-          priceCurrency,
-          priceUnit,
-          observedAt: observedAt || new Date().toISOString(),
-          isAnomaly: false,
-          // Optional fields for updates
-          brand,
-          imageUrl
-      };
-
-      const workflow = await context.prisma.approvalWorkflow.create({
-          data: {
-              entityType: 'PRICE_OBSERVATION',
-              entityId: entityId,
-              changeType: 'CREATE',
-              changeData: changeData,
-              status: 'PENDING',
-              requesterId: context.user.id
-          }
-      });
-
-      return {
-          success: true,
-          message: 'Data submitted for approval',
-          workflowId: workflow.id
-      };
+      return MarketDataService.submitScrapedData(data, context);
     },
 
     approveWorkflow: async (_: any, { id, overrides }: { id: string, overrides?: any }, context: Context) => {
