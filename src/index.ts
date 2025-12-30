@@ -7,6 +7,9 @@ import { expressMiddleware } from '@as-integrations/express5';
 import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
 import { typeDefs } from './graphql/typeDefs';
 import { resolvers } from './graphql/resolvers';
+import prisma from './lib/prisma';
+import { Context } from './types/context';
+import { getUserFromToken, getUserFromApiKey } from './lib/auth';
 
 dotenv.config();
 
@@ -16,7 +19,7 @@ const startServer = async () => {
   const app = express();
   const httpServer = http.createServer(app);
 
-  const server = new ApolloServer({
+  const server = new ApolloServer<Context>({
     typeDefs,
     resolvers,
     plugins: [ApolloServerPluginDrainHttpServer({ httpServer })],
@@ -29,7 +32,24 @@ const startServer = async () => {
     cors<cors.CorsRequest>(),
     express.json(),
     expressMiddleware(server, {
-        context: async ({ req }) => ({ token: req.headers.token }),
+        context: async ({ req }) => {
+          let user = null;
+          const authHeader = req.headers.authorization || '';
+          const apiKey = req.headers['x-api-key'];
+
+          if (apiKey && typeof apiKey === 'string') {
+             user = await getUserFromApiKey(apiKey);
+          } else if (authHeader) {
+             const token = authHeader.replace('Bearer ', '');
+             user = await getUserFromToken(token);
+          }
+          
+          return {
+            token: authHeader,
+            prisma,
+            user
+          };
+        },
     }),
   );
 

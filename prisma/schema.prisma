@@ -1,0 +1,337 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  USER
+  ADMIN
+  API_CONSUMER
+}
+
+enum NotificationChannel {
+  WHATSAPP
+  SMS
+  EMAIL
+  PUSH
+}
+
+enum NotificationFrequency {
+  DAILY
+  WEEKLY
+  INSTANT
+  NEVER
+}
+
+enum WorkflowStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum IntegrationType {
+  SCRAPER
+  API
+  UPLOAD
+}
+
+// 1. User Management (Public Profile linking to Supabase Auth)
+model User {
+  id        String   @id @db.Uuid // Links to auth.users.id
+  name      String?
+  email     String   @unique
+  phone     String?
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  preferences      UserPreference?
+  apiKeys          ApiKey[]
+  smsLogs          SmsLog[]
+  approvalRequests ApprovalWorkflow[] @relation("Requester")
+  approvalActions  ApprovalWorkflow[] @relation("Reviewer")
+
+  @@map("users")
+}
+
+model UserPreference {
+  id                        String                @id @default(uuid()) @db.Uuid
+  userId                    String                @unique @map("user_id") @db.Uuid
+  notificationChannel       NotificationChannel   @default(WHATSAPP) @map("notification_channel")
+  notificationFrequency     NotificationFrequency @default(DAILY) @map("notification_frequency")
+  isActive                  Boolean               @default(true) @map("is_active")
+  languageOverride          String?               @map("language_override")
+  savedSearchFilters        Json?                 @map("saved_search_filters")
+  preferredReportFormat     String?               @map("preferred_report_format")
+  favoriteCommodities       String[]              @map("favorite_commodities") // Array of Commodity IDs
+  favoriteCities            String[]              @map("favorite_cities") // Array of City IDs
+  accessibilitySettings     Json?                 @map("accessibility_settings")
+  priceAlertThresholds      Json?                 @map("price_alert_thresholds")
+  createdAt                 DateTime              @default(now()) @map("created_at")
+  updatedAt                 DateTime              @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model ApiKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String   @unique
+  userId    String   @map("user_id") @db.Uuid
+  isActive  Boolean  @default(true) @map("is_active")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// 2. Logging & Workflows
+model SmsLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String?  @map("user_id") @db.Uuid
+  messageBody       String   @map("message_body")
+  sentAt            DateTime @default(now()) @map("sent_at")
+  status            String
+  providerMessageId String?  @map("provider_message_id")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("sms_logs")
+}
+
+model ApprovalWorkflow {
+  id          String         @id @default(uuid()) @db.Uuid
+  entityType  String         @map("entity_type") // e.g., "COMMODITY", "PRICE_OBSERVATION"
+  entityId    String         @map("entity_id") @db.Uuid
+  changeType  String         @map("change_type") // "CREATE", "UPDATE", "DELETE"
+  changeData  Json?          @map("change_data")
+  status      WorkflowStatus @default(PENDING)
+  requesterId String         @map("requester_id") @db.Uuid
+  reviewerId  String?        @map("reviewer_id") @db.Uuid
+  requestedAt DateTime       @default(now()) @map("requested_at")
+  reviewedAt  DateTime?      @map("reviewed_at")
+
+  requester User  @relation("Requester", fields: [requesterId], references: [id])
+  reviewer  User? @relation("Reviewer", fields: [reviewerId], references: [id])
+
+  @@map("approval_workflows")
+}
+
+// 3. Core Data: Locations & Commodities
+model Country {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  code      String   @unique // ISO code
+  currency  String
+  timezone  String?
+  region    String?
+  language  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cities City[]
+
+  @@map("countries")
+}
+
+model City {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  region    String?
+  latitude  Float?
+  longitude Float?
+  timezone  String?
+  countryId String   @map("country_id") @db.Uuid
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  country           Country            @relation(fields: [countryId], references: [id])
+  priceObservations PriceObservation[]
+  priceAggregates   PriceAggregate[]
+  forecasts         Forecast[]
+
+  @@map("cities")
+}
+
+model CommodityCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  commodities Commodity[]
+
+  @@map("commodity_categories")
+}
+
+model Brand {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  commodities Commodity[]
+
+  @@map("brands")
+}
+
+model Commodity {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  categoryId  String   @map("category_id") @db.Uuid
+  brandId     String?  @map("brand_id") @db.Uuid
+  unit        String   // Base unit (e.g., kg, liter)
+  description String?
+  imageUrl    String?  @map("image_url")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  category          CommodityCategory  @relation(fields: [categoryId], references: [id])
+  brand             Brand?             @relation(fields: [brandId], references: [id])
+  priceObservations PriceObservation[]
+  priceAggregates   PriceAggregate[]
+  forecasts         Forecast[]
+  aliases           CommodityAlias[]
+
+  @@map("commodities")
+}
+
+model CommodityAlias {
+  id          String @id @default(uuid()) @db.Uuid
+  name        String
+  commodityId String @map("commodity_id") @db.Uuid
+
+  commodity Commodity @relation(fields: [commodityId], references: [id], onDelete: Cascade)
+
+  @@map("commodity_aliases")
+}
+
+// 4. Sources & Integrations
+model Source {
+  id                String   @id @default(uuid()) @db.Uuid
+  name              String
+  type              String   // "MARKET", "SUPERMARKET", "WEBSITE"
+  url               String?
+  trustScore        Int      @default(50) @map("trust_score")
+  scrapingFrequency String?  @map("scraping_frequency")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  priceObservations PriceObservation[]
+  history           SourceHistory[]
+
+  @@map("sources")
+}
+
+model SourceHistory {
+  id                String   @id @default(uuid()) @db.Uuid
+  sourceId          String   @map("source_id") @db.Uuid
+  name              String
+  url               String?
+  trustScore        Int      @map("trust_score")
+  scrapingFrequency String?  @map("scraping_frequency")
+  validFrom         DateTime @map("valid_from")
+  validTo           DateTime? @map("valid_to")
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@map("source_history")
+}
+
+model ExternalIntegration {
+  id        String          @id @default(uuid()) @db.Uuid
+  name      String
+  type      IntegrationType
+  config    Json
+  isEnabled Boolean         @default(true) @map("is_enabled")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@map("external_integrations")
+}
+
+// 5. Market Data (Facts & Aggregates)
+model PriceObservation {
+  id             String   @id @default(uuid()) @db.Uuid
+  commodityId    String   @map("commodity_id") @db.Uuid
+  cityId         String   @map("city_id") @db.Uuid
+  sourceId       String   @map("source_id") @db.Uuid
+  priceValue     Decimal  @map("price_value") @db.Decimal(10, 2)
+  priceCurrency  String   @map("price_currency")
+  priceUnit      String   @map("price_unit") // Unit observed (might differ from base)
+  observedAt     DateTime @map("observed_at")
+  isAnomaly      Boolean  @default(false) @map("is_anomaly")
+  qualityScore   Int?     @map("quality_score")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  commodity Commodity @relation(fields: [commodityId], references: [id])
+  city      City      @relation(fields: [cityId], references: [id])
+  source    Source    @relation(fields: [sourceId], references: [id])
+
+  @@index([commodityId, cityId, observedAt])
+  @@map("price_observations")
+}
+
+model PriceAggregate {
+  id             String   @id @default(uuid()) @db.Uuid
+  commodityId    String   @map("commodity_id") @db.Uuid
+  cityId         String   @map("city_id") @db.Uuid
+  date           DateTime @db.Date
+  period         String   // "DAILY", "WEEKLY", "MONTHLY"
+  avgPrice       Decimal  @map("avg_price") @db.Decimal(10, 2)
+  minPrice       Decimal  @map("min_price") @db.Decimal(10, 2)
+  maxPrice       Decimal  @map("max_price") @db.Decimal(10, 2)
+  currency       String
+  sampleSize     Int      @map("sample_size")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  commodity Commodity @relation(fields: [commodityId], references: [id])
+  city      City      @relation(fields: [cityId], references: [id])
+
+  @@unique([commodityId, cityId, date, period])
+  @@map("price_aggregates")
+}
+
+model Forecast {
+  id             String   @id @default(uuid()) @db.Uuid
+  commodityId    String   @map("commodity_id") @db.Uuid
+  cityId         String   @map("city_id") @db.Uuid
+  dateGenerated  DateTime @default(now()) @map("date_generated")
+  forecastDate   DateTime @map("forecast_date") @db.Date
+  predictedPrice Decimal  @map("predicted_price") @db.Decimal(10, 2)
+  confidence     Float?
+  modelUsed      String?  @map("model_used")
+
+  commodity Commodity @relation(fields: [commodityId], references: [id])
+  city      City      @relation(fields: [cityId], references: [id])
+
+  @@map("forecasts")
+}
+
+// 6. Currency & Exchange Rates
+model ExchangeRate {
+  id             String   @id @default(uuid()) @db.Uuid
+  fromCurrency   String   @map("from_currency") // e.g., "KES"
+  toCurrency     String   @map("to_currency")   // e.g., "USD"
+  rate           Decimal  @db.Decimal(10, 6)
+  date           DateTime @db.Date
+  source         String?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([fromCurrency, toCurrency, date])
+  @@map("exchange_rates")
+}
