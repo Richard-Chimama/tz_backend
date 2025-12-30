@@ -290,6 +290,27 @@ export const typeDefs = `#graphql
     forecasts(cityId: ID!, commodityId: ID!): [Forecast!]
   }
 
+  input ScrapedDataInput {
+    commodityName: String!
+    brand: String
+    imageUrl: String
+    cityName: String!
+    country: String
+    priceValue: Decimal!
+    priceCurrency: String!
+    priceUnit: String!
+    sourceName: String!
+    sourceUrl: String
+    observedAt: DateTime
+  }
+
+  type ScrapedDataResult {
+    success: Boolean!
+    message: String
+    observationId: ID
+    workflowId: ID
+  }
+
   type Mutation {
     updateProfile(name: String, email: String, phone: String): User
     updatePreferences(preferences: JSON!): UserPreference
@@ -310,5 +331,10 @@ export const typeDefs = `#graphql
       changeType: String!
       changeData: JSON!
     ): ApprovalWorkflow
+
+    approveWorkflow(id: ID!, overrides: JSON): ApprovalWorkflow
+    rejectWorkflow(id: ID!): ApprovalWorkflow
+
+    submitScrapedData(data: ScrapedDataInput!): ScrapedDataResult
   }
 `;

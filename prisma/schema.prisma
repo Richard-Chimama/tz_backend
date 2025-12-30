@@ -56,6 +56,7 @@ model User {
   smsLogs          SmsLog[]
   approvalRequests ApprovalWorkflow[] @relation("Requester")
   approvalActions  ApprovalWorkflow[] @relation("Reviewer")
+  auditLogs        AuditLog[]
 
   @@map("users")
 }
@@ -334,4 +335,18 @@ model ExchangeRate {
 
   @@unique([fromCurrency, toCurrency, date])
   @@map("exchange_rates")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  action    String
+  entity    String
+  entityId  String   @map("entity_id") @db.Uuid
+  details   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
 }
