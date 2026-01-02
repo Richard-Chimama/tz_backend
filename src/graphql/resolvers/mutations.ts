@@ -39,6 +39,7 @@ export const mutationResolvers = {
       });
     },
     addPriceObservation: async (_: any, args: any, context: Context) => {
+        if (!context.user) throw new Error("Not authenticated");
         return context.prisma.priceObservation.create({
             data: {
                 ...args,

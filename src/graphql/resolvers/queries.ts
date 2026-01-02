@@ -6,6 +6,7 @@ export const queryResolvers = {
       return context.prisma.user.findUnique({ where: { id: context.user.id } });
     },
     users: async (_: any, __: any, context: Context) => {
+      if (!context.user) throw new Error("Not authenticated");
       return context.prisma.user.findMany();
     },
     user: async (_: any, { id }: { id: string }, context: Context) => {
