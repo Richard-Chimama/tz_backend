@@ -6,3 +6,4 @@ coverage
 .vscode
 
 /generated/prisma
+/scripts
