@@ -18,7 +18,15 @@ export const getUserFromToken = async (token: string) => {
     return null;
   }
 
-  return user;
+  // Fetch role from database
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+  });
+
+  return {
+    ...user,
+    role: dbUser?.role || 'USER', // Fallback to USER if not found in DB
+  };
 };
 
 export const getUserFromApiKey = async (apiKey: string) => {
