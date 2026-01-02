@@ -18,6 +18,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=25.0.0"
+  },
   "dependencies": {
     "@apollo/server": "^5.2.0",
     "@as-integrations/express5": "^1.1.2",
