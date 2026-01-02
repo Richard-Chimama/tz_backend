@@ -40,7 +40,7 @@ const startServer = async () => {
           if (apiKey && typeof apiKey === 'string') {
              user = await getUserFromApiKey(apiKey);
           } else if (authHeader) {
-             const token = authHeader.replace('Bearer ', '');
+             const token = authHeader.replace(/^Bearer\s+/i, '');
              user = await getUserFromToken(token);
           }
           
