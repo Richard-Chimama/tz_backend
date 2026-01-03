@@ -165,12 +165,24 @@ export class MarketDataService {
             // Resolve Brand
             let brandId = null;
             if (brandName) {
-                const brand = await context.prisma.brand.upsert({
-                    where: { name: brandName },
-                    update: {},
-                    create: { name: brandName }
-                });
-                brandId = brand.id;
+                try {
+                    const brand = await context.prisma.brand.upsert({
+                        where: { name: brandName },
+                        update: {},
+                        create: { name: brandName }
+                    });
+                    brandId = brand.id;
+                } catch (error: any) {
+                    // Handle race condition where brand was created between check and create
+                    if (error.code === 'P2002') {
+                        const brand = await context.prisma.brand.findUnique({
+                            where: { name: brandName }
+                        });
+                        if (brand) brandId = brand.id;
+                    } else {
+                        throw error;
+                    }
+                }
             }
 
             // Resolve Category
