@@ -1,6 +1,5 @@
-import { PrismaClient, UserRole, NotificationChannel, NotificationFrequency } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { UserRole, NotificationChannel, NotificationFrequency } from '@prisma/client';
+import prisma from '../src/lib/prisma';
 
 async function main() {
   console.log('Start seeding ...');
@@ -117,6 +116,8 @@ async function main() {
     { name: 'Vegetables', description: 'Fresh vegetables' },
     { name: 'Fruits', description: 'Fresh fruits' },
     { name: 'Legumes', description: 'Beans and peas' },
+    { name: 'Electronics', description: 'Electronic devices and accessories' },
+    { name: 'Uncategorized', description: 'Items awaiting classification' },
   ];
 
   for (const cat of categoriesData) {

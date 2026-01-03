@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 
 interface ScrapedData {
     commodityName: string;
+    commodityCategories?: string[];
     cityName: string;
     priceValue: string;
     priceCurrency: string;
@@ -20,13 +21,13 @@ export class MarketDataService {
      * Submits scraped data for approval, with deduplication checks.
      */
     static async submitScrapedData(data: ScrapedData, context: Context) {
-        const { commodityName, cityName, priceValue, priceCurrency, priceUnit, sourceName, sourceUrl, observedAt, brand, country: countryName, imageUrl } = data;
+        const { commodityName, commodityCategories, cityName, priceValue, priceCurrency, priceUnit, sourceName, sourceUrl, observedAt, brand, country: countryName, imageUrl } = data;
 
         // 1. Resolve Entities
         const city = await this.resolveCity(cityName, countryName, context);
         if (!city) return { success: false, message: `City not found: ${cityName}` };
 
-        const commodity = await this.resolveCommodity(commodityName, context);
+        const commodity = await this.resolveCommodity(commodityName, commodityCategories, brand, imageUrl, priceUnit, context);
         if (!commodity) return { success: false, message: `Commodity not found: ${commodityName}` };
 
         const source = await this.resolveSource(sourceName, sourceUrl, context);
@@ -144,7 +145,7 @@ export class MarketDataService {
         });
     }
 
-    private static async resolveCommodity(name: string, context: Context) {
+    private static async resolveCommodity(name: string, categories: string[] | undefined, brandName: string | undefined, imageUrl: string | undefined, unit: string, context: Context) {
         let commodity = await context.prisma.commodity.findFirst({
             where: { name: { equals: name, mode: 'insensitive' } }
         });
@@ -158,6 +159,71 @@ export class MarketDataService {
                 commodity = (alias as any).commodity;
             }
         }
+
+        // Auto-create if not found
+        if (!commodity) {
+            // Resolve Brand
+            let brandId = null;
+            if (brandName) {
+                const brand = await context.prisma.brand.upsert({
+                    where: { name: brandName },
+                    update: {},
+                    create: { name: brandName }
+                });
+                brandId = brand.id;
+            }
+
+            // Resolve Category
+            let category;
+
+            // 1. Try to match provided categories
+            if (categories && categories.length > 0) {
+                const validCategories = categories.filter(c => c && c.trim().length > 0);
+
+                if (validCategories.length > 0) {
+                    category = await context.prisma.commodityCategory.findFirst({
+                        where: {
+                            name: { in: validCategories, mode: 'insensitive' }
+                        }
+                    });
+
+                    if (!category) {
+                        category = await context.prisma.commodityCategory.create({
+                            data: { 
+                                name: validCategories[0], 
+                                description: 'Auto-created from scraper' 
+                            }
+                        });
+                    }
+                }
+            }
+
+            // 2. Fallback to Uncategorized
+            if (!category) {
+                category = await context.prisma.commodityCategory.findFirst({
+                    where: { name: 'Uncategorized' }
+                });
+                
+                if (!category) {
+                     // Fallback if Uncategorized missing (should be seeded)
+                     category = await context.prisma.commodityCategory.create({
+                         data: { name: 'Uncategorized', description: 'Auto-created category' }
+                     });
+                }
+            }
+
+            commodity = await context.prisma.commodity.create({
+                data: {
+                    name: name,
+                    categoryId: category.id,
+                    brandId: brandId,
+                    unit: unit,
+                    imageUrl: imageUrl,
+                    isActive: false // Pending approval/categorization
+                }
+            });
+        }
+
         return commodity;
     }
 

@@ -292,6 +292,7 @@ export const typeDefs = `#graphql
 
   input ScrapedDataInput {
     commodityName: String!
+    commodityCategories: [String!]
     brand: String
     imageUrl: String
     cityName: String!
